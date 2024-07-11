@@ -7,6 +7,7 @@ import java.io.OutputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -38,6 +39,7 @@ import it.marco.digrigoli.entities.Category;
 import it.marco.digrigoli.entities.Course;
 import it.marco.digrigoli.entities.CoursePost;
 import it.marco.digrigoli.entities.User;
+import it.marco.digrigoli.entities.UserLog;
 import it.marco.digrigoli.entities.Role.RoleType;
 import it.marco.digrigoli.entities.dto.CategoryDTO;
 import it.marco.digrigoli.entities.dto.CourseDTO;
@@ -49,6 +51,7 @@ import it.marco.digrigoli.services.interfaces.ICategoryService;
 import it.marco.digrigoli.services.interfaces.ICoursePostService;
 import it.marco.digrigoli.services.interfaces.ICourseService;
 import it.marco.digrigoli.services.interfaces.IDBFileService;
+import it.marco.digrigoli.services.interfaces.IUserLogService;
 import it.marco.digrigoli.services.interfaces.IUserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.ws.rs.Consumes;
@@ -81,19 +84,22 @@ public class CourseUserController {
 	private ICategoryService categoryService;
 
 	private IUserService userService;
+	
+	private IUserLogService userLogService;
 
 	private ObjectMapper objectMapper;
 
 	private IDBFileService dbFileService;
 
 	public CourseUserController(ICourseService courseService, ICategoryService categoryService, IUserService userService,
-			IDBFileService dbFileService, ObjectMapper objectMapper, ICoursePostService coursePostService) {
+			IDBFileService dbFileService, ObjectMapper objectMapper, ICoursePostService coursePostService, IUserLogService userLogService) {
 		this.courseService = courseService;
 		this.categoryService = categoryService;
 		this.userService = userService;
 		this.objectMapper = objectMapper;
 		this.dbFileService = dbFileService;
 		this.coursePostService = coursePostService;
+		this.userLogService = userLogService;
 	}
 
 	private Logger logger = LogManager.getLogger(this.getClass());
@@ -102,17 +108,30 @@ public class CourseUserController {
 	@Path("/{userId}")
 	@Produces(MediaType.APPLICATION_JSON)
 	@Secured(role = "ADMIN")
-	public Response kickUser(@PathParam("courseId") Long courseId, @PathParam("userId") Long userId) {
+	public Response kickUser(@PathParam("courseId") Long courseId, @PathParam("userId") Long userId, @Context HttpServletRequest request) {
 		ModelMapper modelMapper = new ModelMapper();
 		modelMapper.getConfiguration().setMatchingStrategy(MatchingStrategies.STRICT);
 
+		if (request.getSession() == null) {
+			return Response.status(Response.Status.UNAUTHORIZED).build();
+		}
+		User authUser = (User) request.getSession().getAttribute("user");
+
+		if (authUser == null) {
+			return Response.status(Response.Status.UNAUTHORIZED).build();
+		}
+		
 		Optional<Course> course = courseService.getById(courseId);
 		
 		if(course.isEmpty()) {
 			return Response.status(Response.Status.NOT_FOUND).build();
 		}
 		
-		if(!course.get().getUserIds().contains(userId)) {
+		User user = course.get().getUsers().stream().filter((predicate) -> {
+			return predicate.getId().equals(userId);
+		}).findFirst().orElse(null);
+		
+		if(user == null) {
 			return Response.status(Response.Status.NOT_FOUND).build();
 		}
 		
@@ -121,6 +140,25 @@ public class CourseUserController {
 		}).toList());
 		
 		courseService.save(course.get());
+		
+
+		UserLog log = new UserLog();
+		log.setUser(user);
+		log.setCreatedAt(Instant.now());
+		
+		Map<String, Object> data = new HashMap<>();
+		data.put("type", "COURSE_KICKED");
+		data.put("course_id", course.get().getId());
+		data.put("kicked_by", authUser.getId());
+		
+		try {
+			log.setData(objectMapper.writeValueAsString(data));
+		} catch (JsonProcessingException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		log = userLogService.save(log);
 		
 		return Response.status(Response.Status.OK).build();
 	}

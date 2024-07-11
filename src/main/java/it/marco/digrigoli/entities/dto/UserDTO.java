@@ -28,5 +28,6 @@ public class UserDTO {
 	private String surname;
 	private List<String> roleIds;
 	private List<String> courseIds;
+	private boolean twoFactorEnabled;
 
 }

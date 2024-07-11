@@ -9,5 +9,6 @@ public class UserLoginRequestDTO {
 
 	private String email;
 	private String password;
+	private String twoFactorCode;
 	
 }

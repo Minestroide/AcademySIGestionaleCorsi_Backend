@@ -7,6 +7,7 @@ import java.io.OutputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -38,6 +39,7 @@ import it.marco.digrigoli.entities.Category;
 import it.marco.digrigoli.entities.Course;
 import it.marco.digrigoli.entities.CoursePost;
 import it.marco.digrigoli.entities.User;
+import it.marco.digrigoli.entities.UserLog;
 import it.marco.digrigoli.entities.Role.RoleType;
 import it.marco.digrigoli.entities.dto.CategoryDTO;
 import it.marco.digrigoli.entities.dto.CourseDTO;
@@ -49,6 +51,7 @@ import it.marco.digrigoli.services.interfaces.ICategoryService;
 import it.marco.digrigoli.services.interfaces.ICoursePostService;
 import it.marco.digrigoli.services.interfaces.ICourseService;
 import it.marco.digrigoli.services.interfaces.IDBFileService;
+import it.marco.digrigoli.services.interfaces.IUserLogService;
 import it.marco.digrigoli.services.interfaces.IUserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.ws.rs.Consumes;
@@ -76,6 +79,8 @@ public class CourseController {
 
 	private ICourseService courseService;
 	
+	private IUserLogService userLogService;
+	
 	private ICoursePostService coursePostService;
 
 	private ICategoryService categoryService;
@@ -87,13 +92,14 @@ public class CourseController {
 	private IDBFileService dbFileService;
 
 	public CourseController(ICourseService courseService, ICategoryService categoryService, IUserService userService,
-			IDBFileService dbFileService, ObjectMapper objectMapper, ICoursePostService coursePostService) {
+			IDBFileService dbFileService, ObjectMapper objectMapper, ICoursePostService coursePostService, IUserLogService userLogService) {
 		this.courseService = courseService;
 		this.categoryService = categoryService;
 		this.userService = userService;
 		this.objectMapper = objectMapper;
 		this.dbFileService = dbFileService;
 		this.coursePostService = coursePostService;
+		this.userLogService = userLogService;
 	}
 
 	private Logger logger = LogManager.getLogger(this.getClass());
@@ -254,9 +260,31 @@ public class CourseController {
 		logger.info("Adding "+authUser.getUsername()+ " to course: "+course.get().getName());
 
 		authUser.getCourses().add(course.get());
+		
+		UserLog log = new UserLog();
+		log.setUser(authUser);
+		log.setCreatedAt(Instant.now());
+		
+		Map<String, Object> data = new HashMap<>();
+		data.put("type", "COURSE_SUBSCRIBE");
+		data.put("course_id", course.get().getId());
+		
+		try {
+			log.setData(objectMapper.writeValueAsString(data));
+		} catch (JsonProcessingException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		log = userLogService.save(log);
+		
+		authUser.getUserLogs().add(log);
+		
 		userService.save(authUser);
+		
 		CourseResponseDTO responseDto = new CourseResponseDTO(id,
 				CourseResponseDTO.CourseResponseType.SUCCESSFULLY_ADDED);
+		
 		return Response.status(Response.Status.OK).entity(responseDto).build();
 	}
 
@@ -301,9 +329,31 @@ public class CourseController {
 		}
 
 		logger.info("CourseIds after: " + authUser.getCourses().size());
+		
+		UserLog log = new UserLog();
+		log.setUser(authUser);
+		log.setCreatedAt(Instant.now());
+		
+		Map<String, Object> data = new HashMap<>();
+		data.put("type", "COURSE_UNSUBSCRIBE");
+		data.put("course_id", course.get().getId());
+		
+		try {
+			log.setData(objectMapper.writeValueAsString(data));
+		} catch (JsonProcessingException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		log = userLogService.save(log);
+		
+		authUser.getUserLogs().add(log);
+		
 		userService.save(authUser);
+		
 		CourseResponseDTO responseDto = new CourseResponseDTO(id,
 				CourseResponseDTO.CourseResponseType.SUCCESSFULLY_REMOVED);
+		
 		return Response.status(Response.Status.OK).entity(responseDto).build();
 	}
 

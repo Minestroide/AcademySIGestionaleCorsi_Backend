@@ -12,11 +12,26 @@ import org.modelmapper.internal.util.Lists;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.RequestBody;
 
+import dev.samstevens.totp.code.CodeGenerator;
+import dev.samstevens.totp.code.CodeVerifier;
+import dev.samstevens.totp.code.DefaultCodeGenerator;
+import dev.samstevens.totp.code.DefaultCodeVerifier;
+import dev.samstevens.totp.code.HashingAlgorithm;
+import dev.samstevens.totp.exceptions.QrGenerationException;
+import dev.samstevens.totp.qr.QrData;
+import dev.samstevens.totp.qr.QrGenerator;
+import dev.samstevens.totp.qr.ZxingPngQrGenerator;
+import dev.samstevens.totp.secret.DefaultSecretGenerator;
+import dev.samstevens.totp.secret.SecretGenerator;
+import dev.samstevens.totp.time.SystemTimeProvider;
+import dev.samstevens.totp.time.TimeProvider;
 import it.marco.digrigoli.annotations.JWTTokenNeeded;
 import it.marco.digrigoli.annotations.Secured;
 import it.marco.digrigoli.entities.User;
 import it.marco.digrigoli.entities.dto.UserDTO;
 import it.marco.digrigoli.entities.dto.UserRegistrationDTO;
+import it.marco.digrigoli.entities.dto.UserTwoFactorDisableDTO;
+import it.marco.digrigoli.entities.dto.UserTwoFactorEnableDTO;
 import it.marco.digrigoli.entities.dto.UserUpdateDTO;
 import it.marco.digrigoli.entities.dto.UserUpdatePasswordDTO;
 import it.marco.digrigoli.services.interfaces.IEmailService;
@@ -24,6 +39,7 @@ import it.marco.digrigoli.services.interfaces.IUserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
@@ -51,6 +67,111 @@ public class UserController {
 	}
 
 	@GET
+	@Path("@me/2faconfig")
+	@Consumes(MediaType.APPLICATION_JSON)
+	@Produces(MediaType.APPLICATION_JSON)
+	@JWTTokenNeeded
+	public Response get2faConfig(@Context HttpServletRequest request) throws QrGenerationException {
+
+		if (request.getSession() == null) {
+			return Response.status(Response.Status.UNAUTHORIZED).build();
+		}
+		User authUser = (User) request.getSession().getAttribute("user");
+
+		if (authUser == null) {
+			return Response.status(Response.Status.UNAUTHORIZED).build();
+		}
+		SecretGenerator secretGenerator = new DefaultSecretGenerator();
+
+		String newSecret = secretGenerator.generate();
+		
+		QrData qrData = new QrData.Builder()
+				.label("AcademySI - "+authUser.getEmail())
+				.algorithm(HashingAlgorithm.SHA1)
+				.digits(6)
+				.period(30)
+				.secret(newSecret)
+				.issuer("AcademySI")
+				.build();
+
+		return Response.status(Response.Status.OK).entity(qrData).build();
+	}
+
+	@PUT
+	@Path("@me/twoFactorCode")
+	@Consumes(MediaType.APPLICATION_JSON)
+	@Produces(MediaType.APPLICATION_JSON)
+	@JWTTokenNeeded
+	public Response putTwoFactorCode(@Context HttpServletRequest request, @RequestBody @Valid UserTwoFactorEnableDTO body) throws QrGenerationException {
+
+		if (request.getSession() == null) {
+			return Response.status(Response.Status.UNAUTHORIZED).build();
+		}
+		User authUser = (User) request.getSession().getAttribute("user");
+
+		if (authUser == null) {
+			return Response.status(Response.Status.UNAUTHORIZED).build();
+		}
+		
+		TimeProvider timeProvider = new SystemTimeProvider();
+		CodeGenerator codeGenerator = new DefaultCodeGenerator();
+		DefaultCodeVerifier verifier = new DefaultCodeVerifier(codeGenerator, timeProvider);
+		
+		verifier.setAllowedTimePeriodDiscrepancy(2);
+		
+		if(!verifier.isValidCode(body.getSecret(), body.getCode())) {
+			return Response.status(Response.Status.BAD_REQUEST).build();
+		}
+		
+		authUser.setTwoFactorSecret(body.getSecret());
+		userService.save(authUser);
+
+		return Response.status(Response.Status.OK).build();
+	}
+
+	@PUT
+	@Path("@me/twoFactorCode/disable")
+	@Consumes(MediaType.APPLICATION_JSON)
+	@Produces(MediaType.APPLICATION_JSON)
+	@JWTTokenNeeded
+	public Response deleteTwoFactorCode(@Context HttpServletRequest request, @RequestBody @Valid UserTwoFactorDisableDTO body) throws QrGenerationException {
+
+		if (request.getSession() == null) {
+			return Response.status(Response.Status.UNAUTHORIZED).build();
+		}
+		User authUser = (User) request.getSession().getAttribute("user");
+
+		if (authUser == null) {
+			return Response.status(Response.Status.UNAUTHORIZED).build();
+		}
+		
+		if(!authUser.getTwoFactorEnabled()) {
+			return Response.status(Response.Status.NOT_FOUND).build();
+		}
+		
+		TimeProvider timeProvider = new SystemTimeProvider();
+		CodeGenerator codeGenerator = new DefaultCodeGenerator();
+		DefaultCodeVerifier verifier = new DefaultCodeVerifier(codeGenerator, timeProvider);
+		
+		verifier.setAllowedTimePeriodDiscrepancy(2);
+		
+		if(body == null || body.getCode() == null) {
+			logger.info("Body is null");
+			return Response.status(Response.Status.BAD_REQUEST).build();
+		}
+		
+		if(!verifier.isValidCode(authUser.getTwoFactorSecret(), body.getCode())) {
+			return Response.status(Response.Status.BAD_REQUEST).build();
+		}
+		
+		authUser.setTwoFactorSecret(null);
+		
+		userService.save(authUser);
+
+		return Response.status(Response.Status.OK).build();
+	}
+
+	@GET
 	@Consumes(MediaType.APPLICATION_JSON)
 	@Produces(MediaType.APPLICATION_JSON)
 	@Secured(role = "ADMIN")
@@ -72,10 +193,10 @@ public class UserController {
 		user.setSurname(body.getSurname());
 		user.setName(body.getName());
 		user.setUsername(body.getUsername());
-		
+
 		String newPassword = userService.generateRandomSpecialCharacters(12);
 		user.setPassword(newPassword);
-		
+
 		userService.register(user);
 
 		this.emailService.sendSimpleMessage(body.getEmail(), "Registrazione effettuata",

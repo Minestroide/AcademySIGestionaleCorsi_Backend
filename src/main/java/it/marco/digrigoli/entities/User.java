@@ -7,6 +7,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -15,9 +16,11 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Null;
 import jakarta.validation.constraints.Pattern;
 import lombok.Getter;
 import lombok.Setter;
@@ -36,6 +39,7 @@ public class User implements UserDetails {
 	@Pattern(regexp = "[a-zA-Z0-9]{1,50}", message = "username invalid")
 	@NotNull
 	private String username;
+	private String twoFactorSecret;
 	@Email
 	private String email;
 	@Pattern(regexp = "[a-zA-Z\\\\èàùìò\s]{1,50}", message = "name invalid")
@@ -53,6 +57,8 @@ public class User implements UserDetails {
 	private List<CoursePost> coursePosts;
 	@OneToMany(fetch = FetchType.EAGER, mappedBy = "user")
 	private List<CourseTask> courseTasks;
+	@OneToMany(fetch = FetchType.EAGER, mappedBy = "user")
+	private List<UserLog> userLogs;
 	
 	public List<Long> getRoleIds() {
 		return roles.stream().map((role) -> {
@@ -72,6 +78,10 @@ public class User implements UserDetails {
 		return roles.stream().map((role) -> {
 			return new SimpleGrantedAuthority(role.getType().name());
 		}).toList();
+	}
+	
+	public boolean getTwoFactorEnabled() {
+		return this.twoFactorSecret != null && !this.twoFactorSecret.trim().isBlank();
 	}
 
 }
